@@ -1,0 +1,9 @@
+# fichiers à ne pas suivre
+__pycache__/
+*.pyc
+mlruns/
+*.csv
+.env
+*.log
+*.ipynb_checkpoints
+.DS_Store
