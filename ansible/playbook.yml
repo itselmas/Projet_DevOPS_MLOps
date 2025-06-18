@@ -1,0 +1,182 @@
+---
+########################
+# PHASE COMMUNE
+########################
+- hosts: all
+  become: yes
+  vars:
+    service_user: ubuntu
+    mlflow_port: 5000
+    api_port: 5000
+    app_dir: /opt/fastapi_app
+  tasks:
+    - name: Mettre à jour les paquets APT
+      apt:
+        update_cache: yes
+
+    - name: Installer paquets de base
+      apt:
+        name:
+          - git
+          - curl
+          - unzip
+          - python3-pip
+          - python3-venv
+          - docker.io
+        state: present
+
+    - name: Démarrer et activer Docker
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Ajouter l’utilisateur au groupe docker
+      user:
+        name: "{{ service_user }}"
+        groups: docker
+        append: yes
+
+########################
+# MLFLOW – Nœud training
+########################
+- hosts: training
+  become: yes
+  vars:
+    service_user: ubuntu
+    mlflow_port: 5000
+    mlflow_dir: /opt/mlflow
+    mlflow_venv: /opt/mlflow/venv
+  tasks:
+    - name: Créer le dossier MLflow
+      file:
+        path: "{{ mlflow_dir }}"
+        state: directory
+        owner: "{{ service_user }}"
+        group: "{{ service_user }}"
+        mode: "0755"
+
+    - name: Créer l’environnement virtuel pour MLflow
+      command: python3 -m venv {{ mlflow_venv }}
+      args:
+        creates: "{{ mlflow_venv }}"
+
+    - name: Installer MLflow dans le venv
+      command: "{{ mlflow_venv }}/bin/pip install mlflow[extras]"
+      environment:
+        PIP_BREAK_SYSTEM_PACKAGES: "1"
+
+    - name: Créer le service systemd MLflow
+      copy:
+        dest: /etc/systemd/system/mlflow.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=MLflow Tracking Server
+          After=network.target
+
+          [Service]
+          User={{ service_user }}
+          WorkingDirectory={{ mlflow_dir }}
+          ExecStart={{ mlflow_venv }}/bin/mlflow server \
+            --host 0.0.0.0 \
+            --port {{ mlflow_port }} \
+            --backend-store-uri sqlite:///mlflow.db \
+            --default-artifact-root {{ mlflow_dir }}/artifacts
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Démarrer MLflow
+      systemd:
+        name: mlflow
+        daemon_reload: yes
+        state: started
+        enabled: yes
+
+########################
+# FASTAPI – Nœud API
+########################
+- hosts: api
+  become: yes
+  vars:
+    service_user: ubuntu
+    app_dir: /opt/fastapi_app
+    api_venv: /opt/fastapi_app/venv
+    mlflow_port: 5000
+    api_port: 5000
+    mlflow_tracking_uri: "http://{{ hostvars['ml-training']['ansible_host'] }}:{{ mlflow_port }}"
+  tasks:
+    - name: Créer le dossier de l’API
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ service_user }}"
+        group: "{{ service_user }}"
+        mode: "0755"
+
+    - name: Créer l’environnement virtuel pour FastAPI
+      command: python3 -m venv {{ api_venv }}
+      args:
+        creates: "{{ api_venv }}"
+
+    - name: Installer les dépendances FastAPI dans le venv (avec le module pip)
+      pip:
+        virtualenv: "{{ api_venv }}"
+        name:
+          - fastapi
+          - uvicorn
+          - joblib
+          - numpy
+          - scikit-learn
+        extra_args: --break-system-packages
+      tags: install_deps
+
+    - name: Copier le fichier main.py
+      copy:
+        src: files/main.py
+        dest: "{{ app_dir }}/main.py"
+        mode: "0644"
+        owner: "{{ service_user }}"
+        group: "{{ service_user }}"
+
+    - name: Copier le modèle (facultatif)
+      copy:
+        src: files/model.pkl
+        dest: "{{ app_dir }}/model.pkl"
+        mode: "0644"
+        owner: "{{ service_user }}"
+        group: "{{ service_user }}"
+      ignore_errors: yes
+
+    - name: Créer service systemd pour FastAPI
+      copy:
+        dest: /etc/systemd/system/fastapi.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=FastAPI Inference API
+          After=network.target
+
+          [Service]
+          User={{ service_user }}
+          WorkingDirectory={{ app_dir }}
+          Environment=PYTHONUNBUFFERED=1
+          Environment=MLFLOW_TRACKING_URI={{ mlflow_tracking_uri }}
+          ExecStart={{ api_venv }}/bin/uvicorn main:app --host 0.0.0.0 --port {{ api_port }}
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Démarrer FastAPI
+      systemd:
+        name: fastapi
+        daemon_reload: yes
+        state: started
+        enabled: yes
