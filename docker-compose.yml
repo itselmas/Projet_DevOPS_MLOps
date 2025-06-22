@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  prepare_data:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python prepare_data.py
+    volumes:
+      - ./data:/app/data
+    
+  train:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python training/train.py
+    depends_on:
+      - prepare_data
+    volumes:
+      - ./data:/app/data
+      - ./mlruns:/app/mlruns
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      - MLFLOW_MODEL_PATH=mlruns/0/<run_id>/artifacts/model
+    ports:
+      - "8000:8000"
+    depends_on:
+      - train
+    volumes:
+      - ./data:/app/data
+      - ./mlruns:/app/mlruns 
