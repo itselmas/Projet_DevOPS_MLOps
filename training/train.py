@@ -34,5 +34,9 @@ with mlflow.start_run():
     mlflow.log_metric("mae", mae)
 
     #Saving the model
-    input_example = X_test.iloc[0:1]  
-    mlflow.sklearn.log_model(model, "model", input_example=input_example)
+    input_example = X_test.iloc[0:1]
+    mlflow.sklearn.log_model(
+        sk_model=model,
+        artifact_path="model",
+        input_example=input_example
+    )

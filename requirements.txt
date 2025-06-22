@@ -2,3 +2,6 @@ pandas
 scikit-learn
 mlflow
 numpy
+fastapi
+uvicorn
+pydantic
