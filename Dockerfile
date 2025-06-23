@@ -1,16 +1,19 @@
-#Base image
+# Dockerfile pour l'entraînement
 FROM python:3.10-slim
 
-#Define work folder in the container
 WORKDIR /app
 
-#Copying files
+# Installer les dépendances
 COPY requirements.txt .
-COPY training/ ./training/
-COPY data/ ./data/
-
-#Installing dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-#Executing default command
-CMD ["python", "training/train.py"]
+# Copier les fichiers Python
+COPY prepare_data.py .
+COPY train.py .
+COPY verify_data.py .
+
+# Copier les données brutes
+COPY data/ ./data/
+
+# Lancer la préparation + entraînement automatiquement
+CMD python prepare_data.py && python train.py

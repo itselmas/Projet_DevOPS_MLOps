@@ -1,0 +1,61 @@
+---
+- name: Déploiement complet de l'API FastAPI avec Docker
+  hosts: api
+  become: yes
+
+  vars:
+    app_dir: /home/ubuntu/ml_api
+
+  tasks:
+    - name: Installer Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Ajouter l'utilisateur ubuntu au groupe docker
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Créer le dossier de l'application
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: 0755
+
+    - name: Copier les fichiers du code
+      copy:
+        src: "{{ playbook_dir }}/../api/"
+        dest: "{{ app_dir }}/api/"
+        owner: ubuntu
+        group: ubuntu
+        mode: 0755
+
+    - name: Copier requirements.txt
+      copy:
+        src: "{{ playbook_dir }}/../requirements.txt"
+        dest: "{{ app_dir }}/requirements.txt"
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Copier Dockerfile.api
+      copy:
+        src: "{{ playbook_dir }}/../Dockerfile.api"
+        dest: "{{ app_dir }}/Dockerfile"
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Supprimer l'ancien conteneur s'il existe
+      shell: docker rm -f ml-api || true
+
+    - name: Construire l'image Docker de l'API
+      shell: docker build -t ml-api .
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Lancer le conteneur Docker de l’API
+      shell: docker run -d -p 8000:8000 --name ml-api ml-api

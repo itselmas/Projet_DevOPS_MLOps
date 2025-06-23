@@ -7,3 +7,4 @@ mlruns/
 *.log
 *.ipynb_checkpoints
 .DS_Store
+tofu/.terraform

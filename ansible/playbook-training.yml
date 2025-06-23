@@ -1,0 +1,74 @@
+---
+- name: Exécuter préparation + entraînement sur EC2 training
+  hosts: training
+  become: yes
+
+  vars:
+    train_path: /home/ubuntu/ml_training
+    base_path: "{{ playbook_dir }}/.."
+
+  tasks:
+    - name: Installer Docker
+      apt:
+        name: docker.io
+        update_cache: yes
+
+    - name: Ajouter ubuntu au groupe docker
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Créer le dossier d'entraînement
+      file:
+        path: "{{ train_path }}"
+        state: directory
+
+    - name: Copier train.py
+      copy:
+        src: "{{ base_path }}/training/train.py"
+        dest: "{{ train_path }}/train.py"
+        mode: 0755
+
+    - name: Copier prepare_data.py
+      copy:
+        src: "{{ base_path }}/prepare_data.py"
+        dest: "{{ train_path }}/prepare_data.py"
+        mode: 0755
+
+    - name: Copier verify_data.py
+      copy:
+        src: "{{ base_path }}/data/verify_data.py"
+        dest: "{{ train_path }}/verify_data.py"
+        mode: 0755
+
+    - name: Copier requirements.txt
+      copy:
+        src: "{{ base_path }}/requirements.txt"
+        dest: "{{ train_path }}/requirements.txt"
+
+    - name: Copier le Dockerfile (training)
+      copy:
+        src: "{{ base_path }}/Dockerfile"
+        dest: "{{ train_path }}/Dockerfile"
+
+    - name: Créer le dossier data sur le serveur
+      file:
+        path: "{{ train_path }}/data"
+        state: directory
+
+    - name: Copier les fichiers CSV dans /data
+      copy:
+        src: "{{ item }}"
+        dest: "{{ train_path }}/data/"
+      loop:
+        - "{{ base_path }}/data/housing_raw.csv"
+
+    - name: Construire l’image Docker d’entraînement
+      shell: docker build -t ml-train .
+      args:
+        chdir: "{{ train_path }}"
+
+    - name: Exécuter le conteneur d’entraînement (one-shot)
+      shell: docker run -d --name ml-train-container -v {{ train_path }}:/app ml-train
+      tags: [run_container]
