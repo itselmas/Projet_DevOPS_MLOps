@@ -1,169 +1,198 @@
+👇 Copie-colle ce bloc **tel quel** dans ton `README.md`.
+(Il conserve les parties “locales” que tu avais déjà, et ajoute tout le nécessaire pour le déploiement : création du dossier `_credentials`, clé SSH, Terraform, Ansible, diagramme d’architecture, etc.)
 
+```markdown
+# 🧠 Projet MLOps – Pipeline d’entraînement & API (Docker / Terraform / Ansible / MLflow)
 
-## Comment démarrer
+Ce dépôt propose deux manières de lancer le pipeline :
 
-Pour lancer l'ensemble du pipeline (préparation des données, entraînement et déploiement de l'API), exécutez simplement le script d'orchestration adapté à votre système d'exploitation.
+1. **Local** (Docker Compose) – idéal pour tester sur votre machine.  
+2. **Cloud** (AWS EC2) – provisionné avec **Terraform**, configuré avec **Ansible**.
 
-**Sous Windows :**
-```bash
-.\orchestrate.bat
-```
+---
 
-**Sous Linux ou macOS :**
-```bash
-chmod +x orchestrate.sh
-./orchestrate.sh
-```
-Une fois le script terminé, l'API de prédiction sera accessible à l'adresse [http://localhost:8000](http://localhost:8000).
+## 0. Prérequis rapides
 
-## Tester l'API de prédiction
+| Outil | Version conseillée | Rôle |
+|-------|-------------------|------|
+| Docker & Docker Compose | ≥ 24 | Conteneurisation |
+| Python | ≥ 3.10 | Scripts ML |
+| Terraform | ≥ 1.6 | Provisionnement EC2 |
+| Ansible | ≥ 2.15 | Configuration distante |
+| Compte AWS + clé SSH | — | Exécution dans AWS |
 
-Vous pouvez tester l'API de deux manières :
+---
 
-1.  **Avec l'interface Swagger (recommandé) :**
-    *   Rendez-vous sur [http://localhost:8000/docs](http://localhost:8000/docs).
-    *   Dépliez la section `POST /predict`, cliquez sur `Try it out` et remplissez les champs avec des données d'exemple.
-
-2.  **Avec `curl` (en ligne de commande) :**
-    ```bash
-    curl -X POST "http://localhost:8000/predict" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "median_income": 8.3, "housing_median_age": 41, "rooms_per_household": 7,
-      "bedrooms_per_room": 0.15, "population_per_household": 2.5,
-      "latitude": 37.8, "longitude": -122.2
-    }'
-    ```
-
-## Détails du Pipeline MLOps
-
-Le pipeline est orchestré par Docker Compose et se déroule en 3 étapes séquentielles :
-
-1.  **`prepare_data`**
-    *   Ce service lance le script `prepare_data.py`.
-    *   Il nettoie le jeu de données brut (`data/housing_raw.csv`) et crée de nouvelles caractéristiques (features).
-    *   Le résultat est sauvegardé dans `data/housing_clean.csv`.
-
-2.  **`train`**
-    *   Ce service exécute le script `training/train.py`.
-    *   Il entraîne un modèle de régression linéaire sur les données nettoyées.
-    *   Les métriques, paramètres et le modèle sont tracés et sauvegardés via **MLflow** dans le dossier `mlruns`.
-
-3.  **`api`**
-    *   Ce service déploie une API REST avec FastAPI.
-    *   Au démarrage, il attend que le modèle soit disponible, puis charge automatiquement la dernière version du modèle depuis les artifacts MLflow.
-    *   Il expose un endpoint `/predict` pour effectuer des prédictions.
-
-## Structure du projet
+## 1. Arborescence du projet
 
 ```
+
 .
-├── api/                    # Contient le code de l'API FastAPI
-│   ├── main.py             # Logique de l'API et endpoint /predict
-│   └── wait_for_model.py   # Script pour attendre la création du modèle
-├── data/                   # Contient les données
-│   ├── housing_raw.csv     # Données brutes
-│   └── ...
-├── training/               # Contient le script d'entraînement
+├── Dockerfile                # Image d’entraînement (prepare + train)
+├── Dockerfile.api            # Image FastAPI
+├── ansible/                  # Playbooks & inventaire
+│   ├── inventory.ini         # À remplir avec les IP EC2
+│   ├── playbook-api.yml      # Déploiement de l’API
+│   └── playbook-training.yml # Entraînement modèle
+├── api/                      # Code FastAPI
+│   ├── main.py
+│   └── wait\_for\_model.py
+├── data/                     # Données + script de vérif
+│   ├── housing\_raw\.csv
+│   └── verify\_data.py
+├── training/                 # Script d’entraînement
 │   └── train.py
-├── .gitignore              # Fichiers et dossiers à ignorer par Git
-├── docker-compose.yml      # Orchestration des services Docker
-├── Dockerfile              # Dockerfile pour l'entraînement/préparation
-├── Dockerfile.api          # Dockerfile dédié à l'API
-├── orchestrate.bat         # Script d'orchestration pour Windows
-├── orchestrate.sh          # Script d'orchestration pour Linux/macOS
-└── requirements.txt        # Dépendances Python
+├── prepare\_data.py           # Nettoyage / features
+├── requirements.txt          # Dépendances Python
+├── tofu/                     # Code Terraform (EC2 + SG)
+│   └── main.tf
+├── docker-compose.yml        # Orchestration locale
+├── orchestrate.sh / .bat     # Lancement local tout-en-un
+└── \_credentials/             # 💡 À créer : clés AWS & SSH
+
+````
+
+---
+
+## 2. Mise en place des **identifiants** (dossier `_credentials/`)
+
+1. Crée le dossier `_credentials/` à la racine.  
+2. **AWS** : ajoute le fichier `aws_learner_lab_credentials` (format standard `~/.aws/credentials`).  
+3. **SSH** : place ta clé privée `labsuser.pem` dans ce même dossier **et** dans `~/.ssh/`.
+
+```bash
+chmod 400 ~/.ssh/labsuser.pem           # sécurité
+````
+
+> Le `main.tf` référence directement `_credentials/aws_learner_lab_credentials`.
+
+---
+
+## 3. Déploiement **Cloud** (Terraform ➜ Ansible)
+
+### 3-1. Provisionner deux instances EC2
+
+```bash
+cd tofu
+terraform init
+terraform apply
 ```
 
-## API de Prédiction
+> Terraform affiche deux sorties :
+> `api_instance_public_ip` et `training_instance_public_ip`.
 
-Cette API REST permet de faire des prédictions à partir d'un modèle MLflow.
+### 3-2. Compléter `ansible/inventory.ini`
 
-## Endpoints
+```ini
+[training]
+ml-training ansible_host=<IP_TRAINING> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/labsuser.pem
 
-### `POST /predict`
-- **Description** : Effectue une prédiction à partir des features envoyées.
-- **Body (JSON)** :
-  ```json
-  {
-    "feature1": 1.23,
-    "feature2": 4.56
-    // ...
-  }
-  ```
-- **Réponse (JSON)** :
-  ```json
-  {
-    "prediction": 0.987
-  }
-  ```
-
-## Lancement de l'API
-
-1. Construire l'image Docker :
-   ```sh
-   docker build -t api-mlflow .
-   ```
-2. Lancer le conteneur :
-   ```sh
-   docker run -p 8000:8000 -e MLFLOW_MODEL_PATH=mlruns/0/<run_id>/artifacts/model api-mlflow
-   ```
-
-## Variables d'environnement
-- `MLFLOW_MODEL_PATH` : chemin du modèle MLflow à charger.
-
-## Pipeline complet
-Un script d'automatisation permet de lancer toutes les étapes dans l'ordre : préparation des données, entraînement, puis lancement de l'API. 
-
-## Utilisation du pipeline complet (local)
-
-Pour automatiser la préparation des données, l'entraînement et le lancement de l'API :
-
-- **Sous Windows** :
-  ```bat
-  run_all.bat
-  ```
-- **Sous Linux/Mac** :
-  ```sh
-  chmod +x run_all.sh
-  ./run_all.sh
-  ```
-
-L'API sera accessible sur http://localhost:8000
-
-## Lancement manuel de l'API (hors Docker)
-
-Après avoir préparé les données et entraîné le modèle, lancez simplement :
-```sh
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+[api]
+ml-api ansible_host=<IP_API> ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/labsuser.pem
 ```
 
-## Lancer l'API de prédiction dockerisée (auto-détection du dernier modèle)
+➡️ **Remplace** `<IP_TRAINING>` et `<IP_API>` par les IP fournies par Terraform.
 
-L'API FastAPI détecte automatiquement le dernier modèle MLflow loggé dans `mlruns/0/`.
+### 3-3. Lancer l’entraînement à distance
 
-Pour builder et lancer l'API FastAPI dans un conteneur dédié :
-
-```sh
-docker-compose up --build
+```bash
+ansible-playbook -i ansible/inventory.ini ansible/playbook-training.yml
 ```
 
-L'API sera accessible sur http://localhost:8000
+* Installe Docker sur `ml-training`
+* Construit l’image `ml-train`
+* Exécute `prepare_data.py` puis `train.py` (modèle sauvegardé dans `/home/ubuntu/ml_training/mlruns`).
 
-Vous n'avez plus besoin de modifier le run_id à la main dans le docker-compose ou les variables d'environnement. 
+### 3-4. Déployer l’API
 
-## Orchestration complète du pipeline (étape par étape)
+```bash
+ansible-playbook -i ansible/inventory.ini ansible/playbook-api.yml
+```
 
-Pour garantir que chaque étape se lance strictement après la fin de la précédente, utilisez les scripts d'orchestration :
+* Installe Docker sur `ml-api`
+* Copie le dernier modèle depuis `ml-training` (scp interne)
+* Construit l’image `ml-api` et démarre FastAPI (port 8000).
 
-- **Sous Linux/Mac** :
-  ```sh
+### 3-5. Tester l’API à distance
+
+```bash
+# Interface Swagger
+http://<IP_API>:8000/docs
+
+# Exemple cURL
+curl -X POST "http://<IP_API>:8000/predict" \
+  -H "Content-Type: application/json" \
+  -d '{"median_income":8.3,"housing_median_age":41,"rooms_per_household":7,
+       "bedrooms_per_room":0.15,"population_per_household":2.5,
+       "latitude":37.8,"longitude":-122.2}'
+```
+
+(Remplace `<IP_API>` par l’adresse de ton instance.)
+
+---
+
+## 4. Pipeline **local** (Docker Compose)
+
+Pour un test rapide **sans AWS**.
+
+### 4-1. Lancer le pipeline complet
+
+* **Windows**
+
+  ```bash
+  .\orchestrate.bat
+  ```
+
+* **Linux / macOS**
+
+  ```bash
   chmod +x orchestrate.sh
   ./orchestrate.sh
   ```
-- **Sous Windows** :
-  ```bat
-  orchestrate.bat
-  ```
 
-Chaque étape (préparation, entraînement, API) sera lancée dans l'ordre, et l'API sera accessible sur http://localhost:8000 
+Une fois fini, rendez-vous sur [http://localhost:8000/docs](http://localhost:8000/docs).
+
+### 4-2. Détails internes
+
+1. **prepare\_data** → génère `data/housing_clean.csv`.
+2. **train** → entraîne un modèle, log MLflow (`mlruns/`).
+3. **api** → charge automatiquement le dernier modèle et expose `/predict`.
+
+---
+
+## 5. Diagramme d’architecture
+
+```
+                 ┌───────────────────────┐
+                 │      Terraform        │
+                 │  (VPC, 2× EC2, SG)    │
+                 └──────────┬────────────┘
+                            │
+            ┌───────────────┴───────────────┐
+            │                               │
+┌──────────────────────┐        ┌──────────────────────┐
+│  EC2 ① : ml-training │        │   EC2 ② : ml-api    │
+│  - Docker            │        │  - Docker           │
+│  - ml-train image    │        │  - ml-api image     │
+│  - prepare_data.py   │  SCP   │  - FastAPI (8000)   │
+│  - train.py + MLflow │ ─────► │  - wait_for_model   │
+└──────────────────────┘        └──────────────────────┘
+```
+
+---
+
+## 6. Nettoyer les ressources AWS
+
+```bash
+cd tofu
+terraform destroy
+```
+
+---
+
+### ✨ Remarques
+
+* **Changement d’IP** : chaque `terraform apply` crée de nouvelles IP, pensez à mettre à jour `inventory.ini`.
+* Les scripts d’orchestration locaux (`orchestrate.sh` / `.bat`) ne sont utiles que pour les tests **hors cloud**.
+
+Bon déploiement ! 🚀
